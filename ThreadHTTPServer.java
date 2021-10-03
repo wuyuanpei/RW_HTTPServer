@@ -1,6 +1,6 @@
 
 /**
- ** A per-thread, sequential processing handler server
+ ** A threadpool server
  **/
 
 import java.io.*;
@@ -8,7 +8,7 @@ import java.net.*;
 import java.util.*;
 import org.apache.commons.cli.*;
 
-class HTTPServer {
+class ThreadHTTPServer {
 
 	public static int serverPort;
 
@@ -25,9 +25,11 @@ class HTTPServer {
 	public static int cacheCurrentSize = 0;
 	public static int cacheMaxSize = 0;
 
-	// maximum number of connections that the server will accept concurrently
-	public static final int MAX_THREAD = 100;
-	public static int numThreads = 0;
+	// thread pool size (default 3)
+	// based on ThreadPoolSize <number of threads> in the configuration file
+	public static int threadPoolSize = 3;
+	public static Thread[] serviceThreads;
+	public static Vector<Socket> connSockQ;
 
 	public static void main(String args[]) throws Exception {
 
@@ -41,6 +43,19 @@ class HTTPServer {
 		ServerSocket listenSocket = new ServerSocket(serverPort);
 
 		System.out.println("server listening at: " + listenSocket);
+		System.out.println("thread pool size: " + threadPoolSize);
+
+		// create socket queue
+		connSockQ = new Vector<>();
+
+		// create thread pool
+		serviceThreads = new Thread[threadPoolSize];
+
+		// start all the threads
+		for(int i = 0; i < serviceThreads.length; i++){
+			serviceThreads[i] = new Thread(new ThreadHTTPRequestHandler(i));
+			serviceThreads[i].start();
+		}
 
 		while (true) {
 
@@ -50,10 +65,11 @@ class HTTPServer {
 				Socket connectionSocket = listenSocket.accept();
 				System.out.println("\nReceive request from " + connectionSocket);
 
-				// process a request
-				Thread thread = new Thread(new HTTPRequestHandler(connectionSocket));
-
-				thread.start();
+				// put the connectionSocket to the Q
+				synchronized(connSockQ) {
+					connSockQ.add(connectionSocket);
+					connSockQ.notify();
+				}
 
 			} catch (IOException e) {
 				System.out.println("cannot handle IO for connection socket");
@@ -108,6 +124,9 @@ class HTTPServer {
 				else if(st.contains("CacheSize") && parsingVH == false){
 					cacheMaxSize = 1024 * Integer.parseInt(st.substring(st.indexOf("CacheSize") + 10).trim());
 					cache = new HashMap<>();
+				}
+				else if(st.contains("ThreadPoolSize") && parsingVH == false){
+					threadPoolSize = Integer.parseInt(st.substring(st.indexOf("ThreadPoolSize") + 15).trim());
 				}
 				else if(st.contains("VirtualHost") && parsingVH == false){ // note that *:6789 is ignored
 					vh = new VirtualHost();

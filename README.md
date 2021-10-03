@@ -4,6 +4,7 @@
 
 The first section describes the basic design of the http server (i.e., part 1)
 
+Please feel free to contact me at richard.wu@yale.edu if you have any question about testing this server.
 ## Basic HTTP Server for Part 1
 ### How to get started?
 - Please first render this ``README`` file for the convenience to read
