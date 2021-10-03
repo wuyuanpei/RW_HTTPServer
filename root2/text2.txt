@@ -1,0 +1,4 @@
+This project gives you a chance to better understand HTTP design, including both the protocol and the processing at the server. 
+In Part 1, we focus on implementing the functions; in Part 2, we extend part 1 to focus on high-performance server structures, 
+including concurrent network programming using threads, synchronization, wait/notify (monitor), select I/O, and benchmarking. 
+Hence, when designing Part 1, please consider extension to Part 2 in mind.
