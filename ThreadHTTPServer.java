@@ -14,7 +14,7 @@ class ThreadHTTPServer {
 
 	public static String configFilePath;
 
-	public static final String SERVER_NAME = "RW_HTTPServer/1.0";
+	public static final String SERVER_NAME = "RW_ThreadHTTPServer/1.0";
 
 	/* key is the server name and value is a VirtualHost object */
 	public static HashMap<String, VirtualHost> virtualHosts;

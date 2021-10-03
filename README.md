@@ -1,13 +1,19 @@
 # RW_HTTPServer/1.0
+
+Please first render this ``README`` file for the convenience to read
+
 - Author: Richard Wu
 - Date: Sun, 3 Oct 2021 19:41:28 GMT
 
 The first section describes the basic design of the http server (i.e., part 1)
 
+The second section describes Threadpool design and Select-Multiplexing design (i.e., part 2a and 2b)
+
 Please feel free to contact me at richard.wu@yale.edu if you have any question about testing this server.
+
 ## Basic HTTP Server for Part 1
 ### How to get started?
-- Please first render this ``README`` file for the convenience to read
+
 - Please run the command:
 ```
 ./run.sh
@@ -51,5 +57,35 @@ You should have a running server with ``-config ./config/httpd.conf``
 - Support caching with cache size specified in the configuration file. If ``CacheSize <cache size in KB>`` is not specified, then no cache will be supported. The cache operates under the principle of "first come, first served" and there is no replacement policy. If a file is cached and then modified, unfortunately the old version will still be returned
 - Support Heartbeat Monitoring through a virtual URL ``/load``, ``200`` or ``503`` will be returned indicating available or busy. When the number of threads currently used by the server reaches a preset maximum, ``503`` will be returned
 
+## High-performance HTTP Server for Part 2a & 2b
+### Concurrent HTTP Server using Threadpool
+#### How to get started?
+
+- Please run the command:
+```
+./run_thread.sh
+```
+You should have a running server with ``-config ./config/httpd_thread.conf``
+#### Files/Directories
+##### Java file
+- ``ThreadHTTPServer.java``: the main class and the main thread
+- ``ThreadHTTPRequestHandler.java``: thread in the pool that handles the request
+- ``VirtualHost.java``: virtual host class
+- ``Util.java``: util functions
+##### Jar file
+- ``ThreadHTTPServer.jar``: the jar file to run. It can be produced by ``run_thread.sh`` or ``compile_thread.sh``
+- ``commons-cli-1.4.jar``: the API for parsing command line argument (e.g., ``-config`` flag)
+##### Shell script file
+- ``compile_thread.sh``: compile the java file to class file to jar file
+- ``run_thread.sh``: compile the java file to class file to jar file, and then run the jar file with ``-config ./config/httpd_thread.conf``
+- ``clean.sh``: do the cleanup
+- ``test.sh``: script for testing the server, using the files in root and root2
+##### Others
+- ``MANIFEST_THREAD.MF``: manifest file for ``ThreadHTTPServer.jar`` which sets up the classpath and main class
+
+#### Implementation
+- A concurrent server using a thread pool: the main thread adding connection socket into a queue and a fix number of worker threads getting socket from it (with wait/notify primitives)
+- The key features for HTTP protocol of this server is exactly the same as the basic server
+- Heartbeat Monitoring now will return ``200`` if and only if there is nothing in the connection socket queue, i.e., there is no connection waiting to be served.
 
 
