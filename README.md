@@ -89,6 +89,6 @@ You should have a running server with ``-config ./config/httpd_thread.conf``
 - Heartbeat Monitoring now will return ``200`` if and only if there is nothing in the connection socket queue, i.e., there is no connection waiting to be served.
 
 ### Select-Multiplexing HTTP Server
-
+- Heatbeating Monitor uses cpu usage
 
 

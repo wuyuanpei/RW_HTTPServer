@@ -1,17 +1,36 @@
 /***
- * class SelectHTTPRequestHandler implements a thread that can handle most of the HTTP requests
+ * class SelectHTTPRequestHandler implements a handler for a socket channel
  */
 import java.io.*;
 import java.net.*;
+import java.nio.channels.*;
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.lang.management.ManagementFactory;
+import com.sun.management.OperatingSystemMXBean;
 
-class SelectHTTPRequestHandler implements Runnable {
+class SelectHTTPRequestHandler {
 
-	Socket connSocket;
+	/*Socket connSocket;
 	BufferedReader inFromClient;
-	DataOutputStream outToClient;
+	DataOutputStream outToClient;*/
+	
+	private static final int BUFFER_SIZE = 2048;
+
+	ByteBuffer inBuffer;
+	ByteBuffer outBuffer;
+	
+	StringBuilder request; // string buffer for the header of the request
+	StringBuilder data; // string buffer for the data of the request
+
+	StringBuilder outResponse; // string buffer for the response from the server to the client
+
+	private enum State {
+		READING_HEADER, READING_DATA, GENERATING_RESPONSE, RESPONSE_READY, RESPONSE_SENT
+	}
+	private State state;
 
 	String filePath; //root dir + URL
 	File file;
@@ -35,17 +54,16 @@ class SelectHTTPRequestHandler implements Runnable {
 
 	int contentLength = -1; // for POST request
 
-	public SelectHTTPRequestHandler(Socket connectionSocket) throws IOException{
-
-		this.connSocket = connectionSocket;
-
-		inFromClient = new BufferedReader(new InputStreamReader(connSocket.getInputStream()));
-
-		outToClient = new DataOutputStream(connSocket.getOutputStream());
+	public SelectHTTPRequestHandler() {
+		state = State.READING_HEADER;
+		inBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
+		outBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
+		request = new StringBuilder(BUFFER_SIZE);
+		data = new StringBuilder(BUFFER_SIZE);
+		outResponse = new StringBuilder(BUFFER_SIZE);
 	}
 
-	@Override
-	public void run() {
+	/*public void run() {
 
 		// increment numThreads
 		// we are using the same lock for both numThreads and cache
@@ -86,17 +104,104 @@ class SelectHTTPRequestHandler implements Runnable {
 			Util.DEBUG("Thread_end exception generated!");
 		}
 
-	}
+	}*/
 
+	/* a simple state to record \n\r\n (i.e., the boundary between header & data)
+	* this field cannot be put in the handleRead function as a temporary variable 
+	* because \n\r\n may break in the middle and from two successive reads
+	*/
+	int countNRN = 0; 
 	/**
-	 * Do the cleanup of the thread
+	 * read data from key.channel into request (HTTP status line & header) and data (HTTP data)
+	 * @param key
+	 * @throws IOException
 	 */
-	private void thread_end() throws IOException {
-		synchronized(SelectHTTPRequestHandler.class){
-			SelectHTTPServer.numThreads --;
+	public void handleRead(SelectionKey key) throws IOException {
+		// the state must be either READING_HEADER or READING_DATA
+		if(state != State.READING_HEADER && state != State.READING_DATA) {
+			return;
 		}
-		connSocket.close();
+
+		SocketChannel client = (SocketChannel) key.channel();
+		int readBytes = client.read(inBuffer);
+		Util.DEBUG("handleRead: Read from " + client + " for " + readBytes + " Bytes to buffer " + inBuffer);
+
+		if (readBytes == -1) { // end of stream
+			state = State.GENERATING_RESPONSE;
+			Util.DEBUG("handleRead: readBytes == -1");
+		}
+
+		inBuffer.flip(); // read input
+		
+		// read into request
+		while (inBuffer.hasRemaining() && state == State.READING_HEADER) {
+			char ch = (char) inBuffer.get();
+			//Util.DEBUG("Ch: " + ch);
+			request.append(ch);
+			if(ch == '\n') countNRN++;
+			else if(ch == '\r' && countNRN == 1) countNRN++;
+			else countNRN = 0;
+
+			// NNN (should not happen) or NRN
+			if(countNRN == 3){
+				state = State.READING_DATA;
+			}
+		} 
+
+		// read into data
+		while (inBuffer.hasRemaining() && state == State.READING_DATA) {
+			char ch = (char) inBuffer.get();
+			//Util.DEBUG("ChD: " + ch);
+			data.append(ch);
+		} 
+
+		Util.DEBUG("<request>\n" + request.toString());
+		Util.DEBUG("<data>\n" + data.toString());
+
+		// we make sure that it's always clean when the buffer is used for the next time
+		inBuffer.clear();
+
+		if(contentLength == -1 && state == State.READING_DATA){
+			int CLHeader = request.indexOf("Content-Length:");
+			// GET request that has no Content-Length header
+			if(CLHeader == -1){
+				state = State.GENERATING_RESPONSE;
+			} else {
+				int nextRN = request.indexOf("\r\n", CLHeader);
+				contentLength = Integer.parseInt(request.substring(CLHeader + 15, nextRN).trim());
+			}
+		}
+
+		if(contentLength == data.length()) {
+			state = State.GENERATING_RESPONSE;
+		}
+		Util.DEBUG("contentLength == " + contentLength);
+		Util.DEBUG("The current state is " + (state == State.GENERATING_RESPONSE ? "GENERATING_RESPONSE" : "READING"));
+
+		// generate response
+		if(state == State.GENERATING_RESPONSE) {
+			// turn off read
+			turnOff(key, SelectionKey.OP_READ);
+
+			// error message ready
+			if(parseRequest() == -1) {
+				state = State.RESPONSE_READY;
+				turnOn(key, SelectionKey.OP_WRITE);
+				return;
+			}
+
+			// using heatbeating monitor
+			if(usingHeartbeatingMonitor) {
+				hbMonitor();
+				state = State.RESPONSE_READY;
+				turnOn(key, SelectionKey.OP_WRITE);
+				return;
+			}
+
+		}
 	}
+	
+	public void handleWrite(SelectionKey key) throws IOException {}
 
 	/**
 	 * Parse the HTTP request
@@ -104,7 +209,9 @@ class SelectHTTPRequestHandler implements Runnable {
 	 * @throws IOException
 	 */
 	int parseRequest() throws IOException{
-		String requestMessageLine = inFromClient.readLine();
+		// each item in requestsArr is a line
+		String requestsArr[] = request.toString().split("\\r\\n");
+		String requestMessageLine = requestsArr[0];
 		Util.DEBUG("Request: " + requestMessageLine);
 		// If EOF is reached
 		if(requestMessageLine == null) {
@@ -143,8 +250,9 @@ class SelectHTTPRequestHandler implements Runnable {
 			urlName = urlName.substring(1);
 		
 		// read header
-		String line = inFromClient.readLine();
-		while (line != null && !line.equals("")) {
+		String line;
+		for(int i = 1; i < requestsArr.length; i++) {
+			line = requestsArr[i];
 			int idx = line.indexOf(":");
 			if(idx == -1) {
 				Util.DEBUG(line);
@@ -199,7 +307,6 @@ class SelectHTTPRequestHandler implements Runnable {
 				}
 				Util.DEBUG("ifModifiedSince:" + ifModifiedSince.toString());
 			}
-			line = inFromClient.readLine();
 		}
 
 		// If no Host header has been found
@@ -222,258 +329,39 @@ class SelectHTTPRequestHandler implements Runnable {
 	}
 
 	/**
-	 * Send the file back to the client
-	 * The method will first check the validity of the file, then try to 
-	 * return it through cache, and then return it through the file system
-	 * @return 0 if successful, -1 otherwise
-	 * @throws IOException
-	 */
-	private int outputFile() throws IOException {
-		
-		file = new File(filePath);
-
-		// use index.html or index_m.html if file is a directory
-		if(file.isDirectory()){
-			if(userAgent == PC_USER || userAgent == UNKNOWN_USER) {
-				file = new File(file.getCanonicalPath() + "/index.html");
-			} else if(userAgent == PHONE_USER){
-				String fileDir = file.getCanonicalPath();
-				file = new File(fileDir + "/index_m.html");
-				if(!file.exists()){
-					file = new File(fileDir + "/index.html");
-				}
-			}
-		}
-
-		// the file must be contained in the root directory
-		File rootDir = new File(myVH.getDocRoot());
-		if(!file.getCanonicalPath().startsWith(rootDir.getCanonicalPath())){
-			Util.DEBUG(file.getCanonicalPath() + " is out of root directory!");
-			outputError(403, "Forbidden");
-			return -1;
-		}
-
-		// test whether the file exists
-		if(!file.isFile()){
-			Util.DEBUG(file.getCanonicalPath() + " does not exist!");
-			outputError(404, "Not Found");
-			return -1;
-		}
-
-		// ifModifiedSince is not null
-		if(ifModifiedSince != null) {
-			Date lastModifiedTime = new Date(file.lastModified());
-			// ignore the millisecond
-			if(ifModifiedSince.getTime() / 1000 >= lastModifiedTime.getTime() / 1000){
-				// not exactly an error, but we can use the same interface
-				outputError(304, "Not Modified"); 
-				return -1;
-			}
-		}
-
-		Util.DEBUG("File: " + file.getCanonicalPath());
-
-		// If the file is executable, use CGI
-		if(file.canExecute()){
-			Util.DEBUG("This file is executable. Use CGI!");
-			CGI();
-			return 0;
-		}
-
-		// POST request should only use CGI. (should not get a file)
-		if(requestType == POST_REQUEST){
-			outputError(403, "Forbidden");
-			return -1;
-		}
-
-		outputResponseHeader();
-		outToClient.writeBytes("\r\n");
-		if(outputResponseBodyFromCache() == -1)
-			outputResponseBody();
-		return 0;
-	}
-
-	private void outputResponseHeader() throws IOException {
-		outToClient.writeBytes("HTTP/1.1 200 OK\r\n");
-
-		// Date header
-		Date currentTime = new Date();
-		SimpleDateFormat sdf = new SimpleDateFormat("EEE, dd MMM yyyy hh:mm:ss z");
-		sdf.setTimeZone(TimeZone.getTimeZone("GMT"));
-		outToClient.writeBytes("Date: " + sdf.format(currentTime) + "\r\n");
-
-		// Server header
-		outToClient.writeBytes("Server: " + SelectHTTPServer.SERVER_NAME + "\r\n");
-
-		// Last-Modified header
-		Date lastModifiedTime = new Date(file.lastModified());
-		outToClient.writeBytes("Last-Modified: " + sdf.format(lastModifiedTime) + "\r\n");
-
-		// Content-Type header
-		if (file.getCanonicalPath().endsWith(".jpg"))
-			outToClient.writeBytes("Content-Type: image/jpeg\r\n");
-		else if (file.getCanonicalPath().endsWith(".gif"))
-			outToClient.writeBytes("Content-Type: image/gif\r\n");
-		else if (file.getCanonicalPath().endsWith(".html") || file.getCanonicalPath().endsWith(".htm"))
-			outToClient.writeBytes("Content-Type: text/html\r\n");
-		else // including .txt file
-			outToClient.writeBytes("Content-Type: text/plain\r\n");
-
-		// Content-Length header
-		outToClient.writeBytes("Content-Length: " + (int)file.length()+ "\r\n");
-	}
-
-	private void outputResponseBody() throws IOException {
-		int fileLength = (int)file.length();
-		// send file content
-		FileInputStream fileStream = new FileInputStream(file);
-
-		byte[] fileInBytes = new byte[fileLength];
-		fileStream.read(fileInBytes);
-		outToClient.write(fileInBytes, 0, fileLength);
-		fileStream.close();
-		// put the file content into cache if possible
-		synchronized(SelectHTTPRequestHandler.class){
-			// do nothing if the cache is full. There is no replacement policy
-			if(SelectHTTPServer.cache != null && fileInBytes.length + SelectHTTPServer.cacheCurrentSize <= SelectHTTPServer.cacheMaxSize){
-				SelectHTTPServer.cache.put(file, fileInBytes);
-				SelectHTTPServer.cacheCurrentSize += fileInBytes.length;
-			}
-		}
-	}
-	
-	/**
-	 * Output the file directly from cache if possible, otherwise return -1
-	 * @return 0 if succeed, otherwise -1
-	 * @throws IOException
-	 */
-	private int outputResponseBodyFromCache() throws IOException {
-		// note that only one thread can enter the critical section
-		synchronized(SelectHTTPRequestHandler.class){
-			// note that if the content get cached and then get modified, the old content will still be returned
-			if(SelectHTTPServer.cache != null && SelectHTTPServer.cache.containsKey(file)){
-				Util.DEBUG("cacheSize:" + SelectHTTPServer.cacheCurrentSize + "; cacheMaxSize:" + SelectHTTPServer.cacheMaxSize);
-				byte []content = SelectHTTPServer.cache.get(file);
-				outToClient.write(content, 0, content.length);
-				return 0;
-			}
-			return -1;
-		}
-	}
-	
-	/**
 	 * return a header telling the client whether the service is available
 	 */
 	private void hbMonitor() throws IOException {
-		synchronized(SelectHTTPRequestHandler.class){
-			Util.DEBUG("current # of threads: " + SelectHTTPServer.numThreads);
-			if(SelectHTTPServer.numThreads < SelectHTTPServer.MAX_THREAD){
-				outToClient.writeBytes("HTTP/1.1 200 OK\r\n");
-			} else {
-				outToClient.writeBytes("HTTP/1.1 503 Service Unavailable\r\n");
-			}
+		OperatingSystemMXBean osmxb = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+		double cpu = osmxb.getSystemCpuLoad();
+		Util.DEBUG("load:" + cpu);
+		if(cpu < SelectHTTPServer.MAX_CPU_USAGE){
+			outResponse.append("HTTP/1.1 200 OK\r\n");
+		} else {
+			outResponse.append("HTTP/1.1 503 Service Unavailable\r\n");
 		}
+		
 	}
 
 	/**
-	 * file is an executable and use CGI to execute it
-	 */
-	public int CGI() throws IOException{
-		// build the process
-		ProcessBuilder pb = new ProcessBuilder(file.getCanonicalPath());
- 		Map<String, String> env = pb.environment();
-
-		// post data will be the stdin of CGI script, so put it in a string
-		char buf[] = null;
-		if(requestType == POST_REQUEST && contentLength != -1) {
-			buf = new char[contentLength];
-			// read data (note that in our implementation POST for CGI is the only request that uses data)
-			// also note the we cannot use readLine, because the client may not send \n or \r or EOF
-			// even though buf is larger, you can only read contentLength characters
-			if(inFromClient.read(buf) != contentLength){ 
-				outputError(400, "Bad Request");
-				Util.DEBUG("actual content length is not equal to the length specified!");
-				return -1;
-			}
-		}
-
-		// set environment variables
-		if(query_string != null)
- 			env.put("QUERY_STRING", query_string);
-		else
-			env.put("QUERY_STRING", "");
-
-		if(requestType == GET_REQUEST){
-			env.put("REQUEST_METHOD", "GET");
-			env.put("CONTENT_LENGTH", "");
-		} else if(requestType == POST_REQUEST){
-			env.put("REQUEST_METHOD", "POST");
-			env.put("CONTENT_LENGTH", contentLength == -1 ? "" : "" + contentLength);
-		}
-
-		env.put("SERVER_NAME", myVH.getServerName());
-		env.put("SERVER_PORT", "" + SelectHTTPServer.serverPort);
-		env.put("SERVER_PROTOCOL", "HTTP/1.1");
-		env.put("SERVER_SOFTWARE", SelectHTTPServer.SERVER_NAME);
-
-		env.put("REMOTE_ADDR", connSocket.getInetAddress().getHostAddress());
-		env.put("REMOTE_HOST", connSocket.getInetAddress().getHostName());
-		env.put("REMOTE_IDENT", ""); // the authentication env variale is ignored
-		env.put("REMOTE_USER", ""); // the authentication env variale is ignored
-
-		// start the process and connect IO
-		Process p = pb.start();
-		InputStream inputStream = p.getInputStream();
-		BufferedReader r = new BufferedReader(new InputStreamReader(inputStream));
-		if(requestType == POST_REQUEST && contentLength != -1) {
-			DataOutputStream outstr = new DataOutputStream(p.getOutputStream());
-			outstr.writeBytes(new String(buf));
-			outstr.flush();
-		}
-		// send response and header
-		outToClient.writeBytes("HTTP/1.1 200 OK\r\n");
-
-		// Date header
-		Date currentTime = new Date();
-		SimpleDateFormat sdf = new SimpleDateFormat("EEE, dd MMM yyyy hh:mm:ss z");
-		sdf.setTimeZone(TimeZone.getTimeZone("GMT"));
-		outToClient.writeBytes("Date: " + sdf.format(currentTime) + "\r\n");
-
-		// Server header
-		outToClient.writeBytes("Server: " + SelectHTTPServer.SERVER_NAME + "\r\n");
-
-		// Content-Type header
-		outToClient.writeBytes("Content-Type: text/plain\r\n");
-
-		// Transfer-Encoding header
-		outToClient.writeBytes("Transfer-Encoding: chunked\r\n");
-
-		outToClient.writeBytes("\r\n");
-
-		// Output from the CGI script
-		// here, we ignore the header output by the CGI program and treat it the same as data
-		String line = r.readLine();
-		while (line != null) {
-			//Util.DEBUG(line);
-			int lineLen = line.length();
-			outToClient.writeBytes(Integer.toHexString(lineLen + 1) + "\r\n");
-			outToClient.writeBytes(line + "\n\r\n"); //\n is appended because readLine discarded it
-			line = r.readLine();
-		}
-		outToClient.writeBytes("0\r\n\r\n");
-		return 0;
-	}
-
-	/**
-	 * Send error message to the client
+	 * Put error message to the outResponse string buffer
 	 * @param errCode status code
 	 * @param errMsg error message
 	 */
-	void outputError(int errCode, String errMsg) {
-		try {
-			outToClient.writeBytes("HTTP/1.1 " + errCode + " " + errMsg + "\r\n");
-		} catch (Exception e) {
-		}
+	private void outputError(int errCode, String errMsg) {
+		outResponse.append("HTTP/1.1 " + errCode + " " + errMsg + "\r\n");
 	}
-	
+
+	/* Turn on/off a key's interest */
+	private void turnOn(SelectionKey key, int op) {
+		int nextState = key.interestOps();
+		nextState = nextState | op;
+		key.interestOps(nextState);
+	}
+
+	private void turnOff(SelectionKey key, int op) {
+		int nextState = key.interestOps();
+		nextState = nextState & ~op;
+		key.interestOps(nextState);
+	}
 }

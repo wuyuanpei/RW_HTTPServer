@@ -6,6 +6,8 @@
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.nio.*;
+import java.nio.channels.*;
 import org.apache.commons.cli.*;
 
 class SelectHTTPServer {
@@ -25,9 +27,10 @@ class SelectHTTPServer {
 	public static int cacheCurrentSize = 0;
 	public static int cacheMaxSize = 0;
 
-	// maximum number of connections that the server will accept concurrently
-	public static final int MAX_THREAD = 100;
-	public static int numThreads = 0;
+	// maximum cpu usage (for returning 503 or 200 in heartbeating monitor)
+	public static final double MAX_CPU_USAGE = 0.8;
+
+	public static Selector selector; // the selector for the server
 
 	public static void main(String args[]) throws Exception {
 
@@ -37,14 +40,26 @@ class SelectHTTPServer {
 		// read config
 		readConfig();
 		
-		// create server socket
-		ServerSocket listenSocket = new ServerSocket(serverPort);
+		// create server socket channel
+		ServerSocketChannel sch = openServerSocketChannel(serverPort);
 
-		System.out.println("server listening at: " + listenSocket);
+		System.out.println("server listening at port: " + serverPort);
 
+		try {
+			// create selector
+			selector = Selector.open();
+
+			// register server socket (no need to use attachment)
+			sch.register(selector, SelectionKey.OP_ACCEPT);
+
+		} catch (IOException e) {
+			Util.panic(1, "Cannot open selector!");
+		}
+
+		// event loop
 		while (true) {
 
-			try {
+			/*try {
 
 				// take a ready connection from the accepted queue
 				Socket connectionSocket = listenSocket.accept();
@@ -57,8 +72,134 @@ class SelectHTTPServer {
 
 			} catch (IOException e) {
 				System.out.println("cannot handle IO for connection socket");
+			}*/
+
+			try {
+				// block to wait for events
+				selector.select();
+			} catch(IOException e){
+				e.printStackTrace();
+				Util.panic(2, "Selector IOException generated!");
+			} catch(ClosedSelectorException e){
+				e.printStackTrace();
+				Util.panic(3, "ClosedSelectorException generated!");
 			}
-		}
+
+			// readyKeys is a set of ready events
+			Set<SelectionKey> readyKeys = selector.selectedKeys();
+
+			// create an iterator for the set
+			Iterator<SelectionKey> iterator = readyKeys.iterator();
+
+			// iterate over all events
+			while (iterator.hasNext()) {
+				SelectionKey key = iterator.next();
+				iterator.remove();
+
+				try {
+					if (key.isAcceptable()) {
+						// a new connection is ready to be accepted
+						handleAccept(key);
+					} // end of isAcceptable
+
+					if (key.isReadable()) {
+						handleRead(key);
+					} // end of isReadable
+
+					if (key.isWritable()) {
+						handleWrite(key);
+					} // end of if isWritable
+
+				} catch (IOException e) {
+
+					if (key != null) {
+						key.cancel();
+						if (key.channel() != null)
+							try {
+								key.channel().close();
+							} catch (IOException closeex) {
+							}
+					}
+
+				}
+
+			}
+		} // end of event loop
+	}
+
+
+	public static void handleAccept(SelectionKey key) throws IOException {
+
+		ServerSocketChannel server = (ServerSocketChannel) key.channel();
+
+		// extract the ready connection
+		SocketChannel client = server.accept();
+		Util.DEBUG("handleAccept: Accepted connection from " + client);
+
+		// configure the connection to be non-blocking
+		client.configureBlocking(false);
+
+		// register the new connection with interests
+		SelectionKey clientKey = client.register(selector, SelectionKey.OP_READ);
+
+		// save handler
+		clientKey.attach(new SelectHTTPRequestHandler());
+
+	}
+
+	public static void handleRead(SelectionKey key) throws IOException {
+
+		// a connection is ready to be read
+		Util.DEBUG("[>]handleRead");
+
+		SelectHTTPRequestHandler handler = (SelectHTTPRequestHandler) key.attachment();
+		handler.handleRead(key);
+
+		Util.DEBUG("[-]handleRead");
+
+	}
+
+	public static void handleWrite(SelectionKey key) throws IOException {
+
+		// a connection is ready to be written
+		Util.DEBUG("[>]handleWrite");
+
+		SelectHTTPRequestHandler handler = (SelectHTTPRequestHandler) key.attachment();
+		handler.handleWrite(key);
+
+		Util.DEBUG("[-]handleWrite");
+
+	}
+
+
+
+	/**
+	 * set up the server socket channel
+	 * @param port
+	 * @return server socket channel
+	 */
+	public static ServerSocketChannel openServerSocketChannel(int port) {
+		ServerSocketChannel serverChannel = null;
+
+		try {
+			// open server socket for accept
+			serverChannel = ServerSocketChannel.open();
+
+			// extract server socket of the server channel and bind the port
+			ServerSocket ss = serverChannel.socket();
+			InetSocketAddress address = new InetSocketAddress(port);
+			ss.bind(address);
+
+			// configure it to be non blocking
+			serverChannel.configureBlocking(false);
+
+
+		} catch (IOException ex) {
+			ex.printStackTrace();
+			System.exit(1);
+		} // end of catch
+
+		return serverChannel;
 	}
 
 	/**
