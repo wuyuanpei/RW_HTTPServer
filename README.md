@@ -85,7 +85,10 @@ You should have a running server with ``-config ./config/httpd_thread.conf``
 
 #### Implementation
 - A concurrent server using a thread pool: the main thread adding connection socket into a queue and a fix number of worker threads getting socket from it (with wait/notify primitives)
-- The key features for HTTP protocol of this server is exactly the same as the basic server
+- The key features for HTTP protocol of this server are exactly the same as those of the basic server
 - Heartbeat Monitoring now will return ``200`` if and only if there is nothing in the connection socket queue, i.e., there is no connection waiting to be served.
+
+### Select-Multiplexing HTTP Server
+
 
 
