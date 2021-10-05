@@ -30,8 +30,10 @@ class SelectHTTPServer {
 	// maximum cpu usage (for returning 503 or 200 in heartbeating monitor)
 	public static final double MAX_CPU_USAGE = 0.8;
 
-	// maximum time (in millisec) for a connection to finish (otherwise kill it)
+	// maximum time (in millisec) for a connection to finish (otherwise 
+	// connection over TIME_MAXIMUM will be killed [in TIME_BUFFER millisec])
 	public static final long TIME_MAXIMUM = 3000;
+	public static final long TIME_BUFFER = 1000;
 
 	public static Selector selector; // the selector for the server
 
@@ -86,8 +88,9 @@ class SelectHTTPServer {
 
 			try {
 				// block to wait for events
-				// block for at most TIME_MAXIMUM millisec, so that connection over TIME_MAXIMUM will be killed
-				selector.select(TIME_MAXIMUM);
+				// block for at most TIME_BUFFER millisec, 
+				// so that connection over TIME_MAXIMUM will be killed in TIME_BUFFER
+				selector.select(TIME_BUFFER);
 			} catch (IOException e) {
 				e.printStackTrace();
 				Util.panic(2, "Selector IOException generated!");
