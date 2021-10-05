@@ -20,7 +20,7 @@ class SelectHTTPServer {
 
 	/* key is the server name and value is a VirtualHost object */
 	public static HashMap<String, VirtualHost> virtualHosts;
-	/* the default virtual host if no Host header is specified*/
+	/* the default virtual host if no Host header is specified */
 	public static VirtualHost defaultVHost;
 
 	public static HashMap<File, byte[]> cache; // cache, where key is the file and value is the content
@@ -32,6 +32,8 @@ class SelectHTTPServer {
 
 	public static Selector selector; // the selector for the server
 
+	public static boolean stop = false; // whether to check there is still open channels (set by ShutdownCommand)
+
 	public static void main(String args[]) throws Exception {
 
 		// parse argument
@@ -39,11 +41,15 @@ class SelectHTTPServer {
 
 		// read config
 		readConfig();
-		
+
 		// create server socket channel
 		ServerSocketChannel sch = openServerSocketChannel(serverPort);
 
 		System.out.println("server listening at port: " + serverPort);
+
+		// start command thread
+		CommandThread ct = new CommandThread();
+		new Thread(ct).start();
 
 		try {
 			// create selector
@@ -59,28 +65,29 @@ class SelectHTTPServer {
 		// event loop
 		while (true) {
 
-			/*try {
-
-				// take a ready connection from the accepted queue
-				Socket connectionSocket = listenSocket.accept();
-				System.out.println("\nReceive request from " + connectionSocket);
-
-				// process a request
-				Thread thread = new Thread(new SelectHTTPRequestHandler(connectionSocket));
-
-				thread.start();
-
-			} catch (IOException e) {
-				System.out.println("cannot handle IO for connection socket");
-			}*/
+			/*
+			 * try {
+			 * 
+			 * // take a ready connection from the accepted queue Socket connectionSocket =
+			 * listenSocket.accept(); System.out.println("\nReceive request from " +
+			 * connectionSocket);
+			 * 
+			 * // process a request Thread thread = new Thread(new
+			 * SelectHTTPRequestHandler(connectionSocket));
+			 * 
+			 * thread.start();
+			 * 
+			 * } catch (IOException e) {
+			 * System.out.println("cannot handle IO for connection socket"); }
+			 */
 
 			try {
 				// block to wait for events
 				selector.select();
-			} catch(IOException e){
+			} catch (IOException e) {
 				e.printStackTrace();
 				Util.panic(2, "Selector IOException generated!");
-			} catch(ClosedSelectorException e){
+			} catch (ClosedSelectorException e) {
 				e.printStackTrace();
 				Util.panic(3, "ClosedSelectorException generated!");
 			}
@@ -122,11 +129,36 @@ class SelectHTTPServer {
 					}
 
 				}
-
 			}
+
+			// deal with command queue
+			synchronized (ct.commandQ) {
+				while (!ct.commandQ.isEmpty()) {
+					Command cm = ct.commandQ.remove(0);
+					cm.runCommand();
+				}
+			}
+
+			if (stop) {
+				// check whether there are still (not closed) keys, if not, close selector and
+				// exit the event loop
+				Iterator<SelectionKey> it = SelectHTTPServer.selector.keys().iterator();
+				boolean allClosed = true;
+				while (it.hasNext()) {
+					SelectionKey key = it.next();
+					if (key.isValid()) {
+						allClosed = false;
+					}
+				}
+				if (allClosed) {
+					selector.close();
+					System.out.println("Server shut down!");
+					return;
+				}
+			}
+
 		} // end of event loop
 	}
-
 
 	public static void handleAccept(SelectionKey key) throws IOException {
 
@@ -171,10 +203,9 @@ class SelectHTTPServer {
 
 	}
 
-
-
 	/**
 	 * set up the server socket channel
+	 * 
 	 * @param port
 	 * @return server socket channel
 	 */
@@ -192,7 +223,6 @@ class SelectHTTPServer {
 
 			// configure it to be non blocking
 			serverChannel.configureBlocking(false);
-
 
 		} catch (IOException ex) {
 			ex.printStackTrace();
@@ -240,36 +270,32 @@ class SelectHTTPServer {
 			VirtualHost vh = null;
 			while ((st = br.readLine()) != null) {
 				// ignore the comments
-				if(st.contains("#")){
+				if (st.contains("#")) {
 					st = st.substring(0, st.indexOf("#"));
 				}
-				if(st.contains("Listen") && parsingVH == false){
+				if (st.contains("Listen") && parsingVH == false) {
 					serverPort = Integer.parseInt(st.substring(st.indexOf("Listen") + 7).trim());
-				}
-				else if(st.contains("CacheSize") && parsingVH == false){
+				} else if (st.contains("CacheSize") && parsingVH == false) {
 					cacheMaxSize = 1024 * Integer.parseInt(st.substring(st.indexOf("CacheSize") + 10).trim());
 					cache = new HashMap<>();
-				}
-				else if(st.contains("VirtualHost") && parsingVH == false){ // note that *:6789 is ignored
+				} else if (st.contains("VirtualHost") && parsingVH == false) { // note that *:6789 is ignored
 					vh = new VirtualHost();
 					parsingVH = true;
-				}
-				else if(st.contains("VirtualHost") && parsingVH == true){
+				} else if (st.contains("VirtualHost") && parsingVH == true) {
 					virtualHosts.put(vh.getServerName(), vh);
-					if(defaultVHost == null)
+					if (defaultVHost == null)
 						defaultVHost = vh;
 					vh = null;
 					parsingVH = false;
-				}
-				else if(parsingVH == true) {
-					if(st.contains("DocumentRoot")){
+				} else if (parsingVH == true) {
+					if (st.contains("DocumentRoot")) {
 						int idx = st.indexOf("DocumentRoot") + 13;
 						String docRoot = st.substring(idx).trim();
 						// igore the quotation mark if any
-						if(docRoot.charAt(0) == '\"' && docRoot.charAt(docRoot.length() - 1) == '\"')
+						if (docRoot.charAt(0) == '\"' && docRoot.charAt(docRoot.length() - 1) == '\"')
 							docRoot = docRoot.substring(1, docRoot.length() - 1);
 						vh.setDocRoot(docRoot);
-					} else if(st.contains("ServerName")){
+					} else if (st.contains("ServerName")) {
 						int idx = st.indexOf("ServerName") + 11;
 						vh.setServerName(st.substring(idx).trim());
 					}
@@ -279,7 +305,7 @@ class SelectHTTPServer {
 			Util.panic(2, "configuration file does not exist!");
 		} catch (IOException e) {
 			Util.panic(3, "cannot read configuation file!");
-		} catch (NumberFormatException e){
+		} catch (NumberFormatException e) {
 			Util.panic(4, "cannot parse listen port!");
 		}
 		Util.DEBUG(virtualHosts.toString());

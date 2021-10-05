@@ -1,6 +1,6 @@
 public class Util {
 
-	public static final boolean _DEBUG = true;
+	public static final boolean _DEBUG = false;
 
 	/**
 	 * Panic with message printed out and exit with status
