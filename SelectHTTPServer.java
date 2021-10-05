@@ -30,6 +30,9 @@ class SelectHTTPServer {
 	// maximum cpu usage (for returning 503 or 200 in heartbeating monitor)
 	public static final double MAX_CPU_USAGE = 0.8;
 
+	// maximum time (in millisec) for a connection to finish (otherwise kill it)
+	public static final long TIME_MAXIMUM = 3000;
+
 	public static Selector selector; // the selector for the server
 
 	public static boolean stop = false; // whether to check there is still open channels (set by ShutdownCommand)
@@ -83,7 +86,8 @@ class SelectHTTPServer {
 
 			try {
 				// block to wait for events
-				selector.select();
+				// block for at most TIME_MAXIMUM millisec, so that connection over TIME_MAXIMUM will be killed
+				selector.select(TIME_MAXIMUM);
 			} catch (IOException e) {
 				e.printStackTrace();
 				Util.panic(2, "Selector IOException generated!");
@@ -136,6 +140,16 @@ class SelectHTTPServer {
 				while (!ct.commandQ.isEmpty()) {
 					Command cm = ct.commandQ.remove(0);
 					cm.runCommand();
+				}
+			}
+
+			Iterator<SelectionKey> iter = SelectHTTPServer.selector.keys().iterator();
+			long currentTime = System.currentTimeMillis();
+			while (iter.hasNext()) {
+				SelectionKey key = iter.next();
+				SelectHTTPRequestHandler handler = (SelectHTTPRequestHandler) key.attachment();
+				if(handler != null){
+					handler.testAndKill(currentTime, key);
 				}
 			}
 

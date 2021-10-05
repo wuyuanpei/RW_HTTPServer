@@ -59,12 +59,15 @@ class SelectHTTPRequestHandler {
 
 	int contentLength = -1; // for POST request
 
+	long createTime; // the time that the object (i.e. the connection) is created
+
 	public SelectHTTPRequestHandler() {
 		state = State.READING_HEADER;
 		inBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
 		outBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
 		request = new StringBuilder(BUFFER_SIZE);
 		data = new StringBuilder(BUFFER_SIZE);
+		createTime = System.currentTimeMillis();
 	}
 
 	/* a simple state to record \n\r\n (i.e., the boundary between header & data)
@@ -617,5 +620,18 @@ class SelectHTTPRequestHandler {
 		int nextState = key.interestOps();
 		nextState = nextState & ~op;
 		key.interestOps(nextState);
+	}
+
+	public void testAndKill(long currentTime, SelectionKey key){
+		if(currentTime >= createTime + SelectHTTPServer.TIME_MAXIMUM){
+			try{
+				key.channel().close();
+				key.cancel();
+			} catch(IOException e){
+				e.printStackTrace();
+				System.out.println("kill socket fail!");
+				return;
+			}	
+		}
 	}
 }
