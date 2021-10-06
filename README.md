@@ -140,17 +140,47 @@ The following observations are made about the testing environment:
 - Other programs running in the operating system, espicially those using internet, such as Chrome, may negatively affect the performance of the server. This is because when we stress test the server, its performance really depends on how much time the operating system can allocate for it to run. To solve this issue, all of the other user programs are turned off during testing.
 - Between each test, we need to sleep for a couple seconds (10 seconds in the analysis below) to let the operating system release resources (such as closed sockets and dead threads) in order to get accurate performance. If we directly execute the next stress test right behind the first test, its performance will be negatively affected by the first test.
 - We need to warm up the server before running any test. The server uses cache, so we want both the first and the rest stress tests to have fair performance results (that use the cache).
-- ``-n requests`` and ``-c concurrency`` cannot be too big, otherwise the threads/sockets in the server queue or in the operating system buffer will pile up and eventually overflow and crash the server. In the analysis below, we use ``-n 1000`` and ``-c`` from ``1`` to ``50`` 
+- ``-n requests`` and ``-c concurrency`` cannot be too big, otherwise the threads/sockets in the server queue or in the operating system buffer will pile up and eventually overflow and crash the server. In the analysis below, we use ``-n`` ``500`` and ``1000``, and ``-c`` from ``1`` to ``50`` 
 - For the thread pool server, different pool sizes will have different performance, thus we pick pool size equal to 5 and 25 for testing
 - The script ``run_benchmark.sh`` is used for testing HTML retrieval, with the results recorded in ``benchmark_result.txt``. You can use the following command:
 ```
-./run_benchmark.sh 1000 10 testing
+./run_benchmark.sh [concurrency] [sleep time] [message]
 ```
 - We use ``macOS Catalina 10.15.7`` with 2.3 GHz Quad-Core Intel Core i5 and Memory 8 GB 2133 MHz LPDDR3 for the testing below
 
 The graph and table below show the relationship between concurrent requests and bandwidth (in ``KB/sec``)
 
-![performance.png](./performance.png)
+When ``-n`` is ``500``:
+
+![performance500.png](./performance500.png)
+
+| concurrency | basic_server | thread_server_5 | thread_server_25 | select_server |
+|-------------|--------------|-----------------|------------------|---------------|
+| 1           | 564.25       | 662.45          | 655.68           | 1440.32       |
+| 2           | 1004.33      | 1132.2          | 1121.85          | 1868.89       |
+| 3           | 1143.7       | 1338.7          | 1334.49          | 1988.46       |
+| 4           | 1390.03      | 1539.63         | 1500.61          | 1877.3        |
+| 5           | 1554.52      | 1709.05         | 1669.53          | 2010.47       |
+| 6           | 1646.03      | 1835.89         | 1830.43          | 2007.06       |
+| 7           | 1660.97      | 1810.69         | 1917.28          | 1941.86       |
+| 8           | 1747.26      | 1844.73         | 1966.1           | 2030.55       |
+| 9           | 1779.96      | 1799.42         | 1929.17          | 2011.36       |
+| 10          | 1808.6       | 1878.58         | 1922.76          | 2019.12       |
+| 11          | 1809.34      | 1645.5          | 1798.6           | 2018.38       |
+| 13          | 1787.97      | 1773.24         | 1999.33          | 1970.68       |
+| 15          | 1788.4       | 1835.57         | 1872.81          | 2002.03       |
+| 17          | 1785.55      | 1841.68         | 1916.77          | 1913.77       |
+| 20          | 1780.37      | 1798.06         | 1931.07          | 2000.84       |
+| 25          | 1774.68      | 1817.04         | 1891.11          | 1981.23       |
+| 30          | 1789.02      | 1818.48         | 1867.44          | 1979.48       |
+| 35          | 1827.23      | 1799.3          | 1873.75          | 1986.97       |
+| 40          | 1809.12      | 1774.74         | 1903.22          | 1976.68       |
+| 45          | 1798.03      | 1852.75         | 1875.92          | 1870.54       |
+| 50          | 1820.61      | 1862.53         | 1845.28          | 1959.2        |
+
+When ``-n`` is ``1000``:
+
+![performance1000.png](./performance1000.png)
 
 | concurrency | basic_server | thread_server_5 | thread_server_25 | select_server |
 |-------------|--------------|-----------------|------------------|---------------|
@@ -176,6 +206,6 @@ The graph and table below show the relationship between concurrent requests and 
 | 45          | 1716.27      | 1671.82         | 1751.31          | 1935.74       |
 | 50          | 1530.06      | 1678.88         | 1693.81          | 1912.89       |
 - It can be noticed that the performance of select server is overall better than the basic and thread pool servers
-- **The highest performance for select server happens when concurrency equals to 17: the bandwidth is ``2014.69 KB/sec``, i.e., ``16.12Mbps``**
+- **When number of requests sent is 1000, the highest performance for select server happens when concurrency equals to 17: the bandwidth is ``2014.69 KB/sec``, i.e., ``16.12Mbps``**
 - The basic server and thread pool servers have roughly the same performance (i.e., ``1700 KB/sec``) after the concurrency has reached 10. The two thread pool servers are slightly better than the basic server.
 - It can be noticed that when concurrency is between 5 and 25, the thread pool server with pool size 25 is mostly better than the server with pool size 5. This is reasonable because the smaller pool size server has run out of its threads and has to wait for the former connections to finish.
