@@ -1,6 +1,6 @@
 # RW_HTTPServer/1.0
 
-Please first render this ``README`` file for the convenience to read
+Please first render this ``README`` file before reading
 
 - Author: Richard Wu
 - Date: Sun, 3 Oct 2021 19:41:28 GMT
