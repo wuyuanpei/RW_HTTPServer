@@ -63,7 +63,7 @@ class ThreadHTTPServer {
 
 				// take a ready connection from the accepted queue
 				Socket connectionSocket = listenSocket.accept();
-				System.out.println("\nReceive request from " + connectionSocket);
+				Util.DEBUG("\nReceive request from " + connectionSocket);
 
 				// put the connectionSocket to the Q
 				synchronized(connSockQ) {

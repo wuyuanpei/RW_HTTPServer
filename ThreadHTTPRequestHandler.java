@@ -78,7 +78,7 @@ class ThreadHTTPRequestHandler implements Runnable {
 							e.printStackTrace();
 							cleanup();
 						}
-						System.out.println("Thread " + thread_id + " processing request");
+						Util.DEBUG("Thread " + thread_id + " processing request");
 					} else {
 						try{
 							ThreadHTTPServer.connSockQ.wait();
