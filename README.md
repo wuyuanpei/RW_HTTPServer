@@ -3,7 +3,7 @@
 Please first render this ``README`` file before reading
 
 - Author: Richard Wu
-- Date: Sun, 3 Oct 2021 19:41:28 GMT
+- Date: 6 Oct 2021
 
 The first section describes the basic design of the http server (i.e., part 1)
 
@@ -11,7 +11,9 @@ The second section describes Threadpool design and Select-Multiplexing design (i
 
 The third section describes performance benchmarking (i.e., part 2d)
 
-Please feel free to contact me at richard.wu@yale.edu if you have any question about testing this server.
+The last section discusses Netty and nginx (i.e., part 2c)
+
+Please feel free to contact me at richard.wu@yale.edu if you have any question about running/testing this server.
 
 ## Basic HTTP Server for Part 1
 ### How to get started?
@@ -209,3 +211,24 @@ When ``-n`` is ``1000``:
 - **When number of requests sent is 1000, the highest performance for select server happens when concurrency equals to 17: the bandwidth is ``2014.69 KB/sec``, i.e., ``16.12Mbps``**
 - The basic server and thread pool servers have roughly the same performance (i.e., ``1700 KB/sec``) after the concurrency has reached 10. The two thread pool servers are slightly better than the basic server.
 - It can be noticed that when concurrency is between 5 and 25, the thread pool server with pool size 25 is mostly better than the server with pool size 5. This is reasonable because the smaller pool size server has run out of its threads and has to wait for the former connections to finish.
+
+## Comparison of Designs
+This section investigates on other server designs, specifically, Netty and nginx.
+
+### Netty Design
+---
+1. Netty provides multiple event loop implementations. In a typical server channel setting, two event loop groups are created, with one typically called the boss group and the second worker group. What are they? How does Netty achieve synchronization among them?
+> The boss group accepts an incoming connection. The worker group handles the traffic of the accepted connection once the boss accepts the connection and registers the accepted connection to the worker. Netty uses ``ServerBootstrap`` to register these two groups together to archieve synchronization. Each ``ServerSocketChannel`` has its own boss event loop group. Once an incoming connection is accepted successfully by the boss event group, it will pass the accepted channel to one of the worker threads in the worker group that the ``NioServerSocketChannelFactory`` manages and set ``SocketChannel``.
+---
+2. Netty event loop uses an ``ioRatio`` based scheduling algorithm. How it works?
+> The ``ioRatio`` can take value range from 1-100. According to the API, the default value is 50 for ``ioRatio``: the event loop will try to spend the same amount of time for I/O as for non-I/O tasks. The higher the number, the more time can be spent on I/O tasks, and less time on the tasks in the task queue. If ``ioRatio == 100``, then the feature will be disabled: the event loop will ``processSelectedKeys`` first and then ``runAllTasks`` at the end. Otherwise, it will record the current time before ``processSelectedKeys`` and then record time again to compute the time spent on I/O. Then it will ``runAllTasks`` for the time calculated based on the I/O time and ``ioRatio`` by setting up a timeout. If there is no I/O task at all, it will run the minimum number of tasks.
+---
+3. A major novel, interesting feature of Netty is ``ChannelPipeline``. A pipeline may consist of a list of ``ChannelHandler``. Please scan Netty implementation and give a high-level description of how ``ChannelPipeline`` is implemented. Compare [HTTP Hello World Server](https://netty.io/4.0/xref/io/netty/example/http/helloworld/package-summary.html) and [HTTP Snoop Server](https://netty.io/4.0/xref/io/netty/example/http/snoop/package-summary.html), what are the handlers that each includes?
+> A channel event is handled by a list of ``ChannelHandler`` in a ``ChannelPipeline`` which is created automatically when the channel is created. The pipeline implements a form of the Intercepting Filter pattern to give users the control to manipulate how an event is handled and how the handlers in the pipeline can interact with each other. An I/O event is handled by either a ``ChannelInboundHandler`` or a ``ChannelOutboundHandler`` and can be forwarded to its closest handler by calling the event propagation methods defined in ``ChannelHandlerContext``. Users only need to call ``pipeline.addLast`` to add handlers into the pipeline. HelloWorld Server includes ``HttpServerCodec`` and ``HttpHelloWorldServerHandler`` and possibly ``SslHandler`` if ``SslContext`` is used, in its pipeline. Snoop Server includes ``HttpRequestDecoder``, ``HttpResponseEncoder``, ``HttpSnoopServerHandler``, and possibly ``SslHandler`` if ``SslContext`` is used, in its pipeline. Snoop Client includes ``HttpClientCodec``, ``HttpContentDecompressor``, ``HttpSnoopClientHandler``, and possibly ``SslHandler`` if ``SslContext`` is used, in its pipeline. 
+---
+4. Method calls such as ``bind`` return ``ChannelFuture``. Please describe how one may implement the sync method of a future.
+> In Netty, all I/O operations are asynchronous: any I/O calls will return a ``ChannelFuture`` immediately with no guarantee that the requested I/O operation has been completed. A ``ChannelFuture`` represents the status of the I/O operation. The synchronization is implemented as follows: the users need to add a ``ChannelFutureListener`` to the ``ChannelFuture``. The listener will be registered to the I/O thread, so the I/O thread will directly call the ``operationComplete`` method of the listener inside the I/O thread when the I/O operation associated with the future is done . An alternative is to call ``await`` method of the future, which will block and wait on a condition variable. The I/O thread will notify the condition variable when the operation is done.
+---
+5. Instead of using ``ByteBuffer``, Netty introduces a data structure called ``ByteBuf``. Please give one key difference between ``ByteBuffer`` and ``ByteBuf``.
+> Instead of ``position`` pointer and ``limit`` pointer in ``ByteBuffer``, ``ByteBuf`` has two separate pointers: one for read operations, i.e., ``readIndex``, and the other for write operations, i.e., ``writeIndex``. (Of course, ``ByteBuf`` still has ``capacity``). The writer index increases as something is written to a ``ByteBuf`` while the reader index remains unchanged. The reader index and the writer index represents where the message starts and ends respectively, and there is no need to call ``flip`` when doing read after write.
+
