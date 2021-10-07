@@ -232,3 +232,30 @@ This section investigates on other server designs, specifically, Netty and nginx
 5. Instead of using ``ByteBuffer``, Netty introduces a data structure called ``ByteBuf``. Please give one key difference between ``ByteBuffer`` and ``ByteBuf``.
 > Instead of ``position`` pointer and ``limit`` pointer in ``ByteBuffer``, ``ByteBuf`` has two separate pointers: one for read operations, i.e., ``readIndex``, and the other for write operations, i.e., ``writeIndex``. (Of course, ``ByteBuf`` still has ``capacity``). The writer index increases as something is written to a ``ByteBuf`` while the reader index remains unchanged. The reader index and the writer index represents where the message starts and ends respectively, and there is no need to call ``flip`` when doing read after write.
 
+### nginx Design
+---
+1. Although nginx has both Master and Worker, the design is the symmetric design: multiple Workers compete on the shared welcome socket (accept). One issue about the design is that this design does not offer flexible control such as load balance. In ``ngx_event_accept`` (``src/event/ngx_event_accept.c``), a worker initializes a variable ``ngx_accept_disabled = ngx_cycle->connection_n / 8 - ngx_cycle->free_connection_n``. In the event loop, ``ngx_process_events_and_timers()`` (``src/event/ngx_event.c``) of a worker uses this variable to control accepting new connections. Can you please describe what it does? Related with the shared accept, one issue is that when a new connection becomes acceptable, multiple workers can be notified, creating contention. Please read nginx event loop and describe how nginx tries to resolve the contention.
+> The variable ``ngx_accept_disabled``, from my perspective, is a semaphore-like field, defined in ``ngx_event_accept``. It is used to check whether the current thread may be accepting too many connections. If it is greater than 0, it will not try to get the accept mutex, and decrement ``ngx_accept_disabled``. Otherwise, the number of connections does not overload the thread: it will try to get the mutex (i.e., compete with other threads). If successful, the flag is set to ``NGX_POST_EVENTS``, meaning that the event will be handled later in the event loop when the lock is released. Then the thread will continue to process the existing connections.
+---
+2. The nginx event loop (``ngx_process_events_and_timers``) processes both io events and timers. What type of data structure does nginx use to keep track of timers? If it were nginx, how would you implement the 3-second timeout requirement of this project?
+>  Nginx uses a global timeout red-black tree ``ngx_event_timer_rbtree`` which stores all timeouts currently set by the program. According to the developer guide, the key in the red-black tree is of type ``ngx_msec_t`` and is the time when the event occurs. The tree structure can make insertion and deletion operations faster, and help the event loop access the nearest timeouts, which is used to determine how long to wait for I/O events. If it were nginx, we would use the function ``ngx_add_timer(ev, timer)`` to set a timeout for an event. The event loop will be waked up and kill the expired connection.
+---
+3. It is said that nginx processes HTTP in 11 stages. What are the stages?
+> According to the developer guide, the 11 stages are listed as follows:
+> 1. `NGX_HTTP_POST_READ_PHASE` ― First phase: the ``ngx_http_realip_module`` registers its handler at this phase to enable substitution of client addresses
+> 2. `NGX_HTTP_SERVER_REWRITE_PHASE` ― Phase where rewrite directives defined in a ``server`` block are processed
+> 3. `NGX_HTTP_FIND_CONFIG_PHASE` ― Special phase where a location is chosen based on the request URI
+> 4. `NGX_HTTP_REWRITE_PHASE` ― rewrite rules defined in the location, chosen in the previous phase
+> 5. `NGX_HTTP_POST_REWRITE_PHASE` ― Special phase where the request is redirected to a new location if its URI changed during a rewrite
+> 6. `NGX_HTTP_PREACCESS_PHASE` ― A common phase for different types of handlers
+> 7. `NGX_HTTP_ACCESS_PHASE` ― Phase where it is verified that the client is authorized to make the request
+> 8. `NGX_HTTP_POST_ACCESS_PHASE` ― Special phase where the satisfy any directive is processed
+> 9. ``NGX_HTTP_PRECONTENT_PHASE`` ― Phase for handlers to be called prior to generating content
+> 10. `NGX_HTTP_CONTENT_PHASE` ― Phase where the response is normally generated
+> 11. `NGX_HTTP_LOG_PHASE` ― Phase where request logging is performed
+---
+4. A main design feature of nginx is efficient support of upstream; that is, forward request to an upstream server. Can you describe the high level design?
+> Nginx supports http proxying, fastcgi, etc. As discussed in the developer guide, the ``ngx_http_upstream_module`` provides the basic functionality needed to pass requests to remote servers. We can specify an entire pools of backend servers that we can pass requests to, using the ``upstream`` directory. Nginx uses weighted round robin as the default load balancing algorithm. It also supports dynamically configurable group with periodic health checks.
+---
+5. nginx introduces a buffer type ``ngx_buf_t``. Can you briefly compare ``ngx_buf_t`` vs ``ByteBuffer`` in Java nio?
+> Nginx provides buffer via the type ``ngx_buf_t``, which has ``start``, ``end``, ``pos``, ``last`` to mark boundary, and different flags indicating whether the memory referenced is writable/read-only/data in a file, etc. Instead of a single buffer in Java nio, nginx uses a chain of buffer to handle input and output operations, via the type ``ngx_chain_t``. Programs need to link the buffers together using the linked list like data structure.
