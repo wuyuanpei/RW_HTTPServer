@@ -15,6 +15,8 @@ The last section discusses Netty and nginx (i.e., part 2c)
 
 Please feel free to contact me at richard.wu@yale.edu if you have any question about running/testing this server.
 
+The files can also be found at https://github.com/wuyuanpei/RW_HTTPServer
+
 ## Basic HTTP Server for Part 1
 ### How to get started?
 
