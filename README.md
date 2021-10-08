@@ -210,10 +210,15 @@ When ``-n`` is ``1000``:
 | 45          | 1716.27      | 1671.82         | 1751.31          | 1935.74       |
 | 50          | 1530.06      | 1678.88         | 1693.81          | 1912.89       |
 - It can be noticed that the performance of select server is overall better than the basic and thread pool servers
-- **When number of requests sent is 1000, the highest performance for select server happens when concurrency equals to 17: the bandwidth is ``2014.69 KB/sec``, i.e., ``16.12Mbps``**
+- When number of requests sent is 1000, the highest performance for select server happens when concurrency equals to 17: the bandwidth is ``2014.69 KB/sec``, i.e., ``16.12Mbps``
 - The basic server and thread pool servers have roughly the same performance (i.e., ``1700 KB/sec``) after the concurrency has reached 10. The two thread pool servers are slightly better than the basic server.
 - It can be noticed that when concurrency is between 5 and 25, the thread pool server with pool size 25 is mostly better than the server with pool size 5. This is reasonable because the smaller pool size server has run out of its threads and has to wait for the former connections to finish.
 
+### Performance test for ``-n 10000 -c 10``
+When ``-n 10000 -c 10`` is applied as the testing parameters:
+|            | basic_server | thread_server_5 | thread_server_25 | select_server |
+|------------|--------------|-----------------|------------------|---------------|
+| throughput | 2255.48      | 2285.25         | 2946.80          | 3119.43       |
 ## Comparison of Designs
 This section investigates on other server designs, specifically, Netty and nginx.
 
