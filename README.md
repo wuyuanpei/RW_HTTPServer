@@ -215,7 +215,8 @@ When ``-n`` is ``1000``:
 - It can be noticed that when concurrency is between 5 and 25, the thread pool server with pool size 25 is mostly better than the server with pool size 5. This is reasonable because the smaller pool size server has run out of its threads and has to wait for the former connections to finish.
 
 ### Performance Test for ``-n 10000 -c 10``
-The following test is conducted on a different MacBook Pro with 2.3 GHz Quad-Core Intel Core i5 and Memory 16 GB 2133 MHz LPDDR3
+The following tests are conducted on a different MacBook Pro with 2.3 GHz Quad-Core Intel Core i5 and Memory 16 GB 2133 MHz LPDDR3
+
 When ``-n 10000 -c 10`` is applied as the testing parameters:
 |                      | basic_server | thread_server_5 | thread_server_25 | select_server |
 |----------------------|--------------|-----------------|------------------|---------------|
