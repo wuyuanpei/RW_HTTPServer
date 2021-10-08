@@ -214,11 +214,14 @@ When ``-n`` is ``1000``:
 - The basic server and thread pool servers have roughly the same performance (i.e., ``1700 KB/sec``) after the concurrency has reached 10. The two thread pool servers are slightly better than the basic server.
 - It can be noticed that when concurrency is between 5 and 25, the thread pool server with pool size 25 is mostly better than the server with pool size 5. This is reasonable because the smaller pool size server has run out of its threads and has to wait for the former connections to finish.
 
-### Performance test for ``-n 10000 -c 10``
+### Performance Test for ``-n 10000 -c 10``
+The following test is conducted on a different MacBook Pro with 2.3 GHz Quad-Core Intel Core i5 and Memory 16 GB 2133 MHz LPDDR3
 When ``-n 10000 -c 10`` is applied as the testing parameters:
-|            | basic_server | thread_server_5 | thread_server_25 | select_server |
-|------------|--------------|-----------------|------------------|---------------|
-| throughput | 2255.48      | 2285.25         | 2946.80          | 3119.43       |
+|                      | basic_server | thread_server_5 | thread_server_25 | select_server |
+|----------------------|--------------|-----------------|------------------|---------------|
+| throughput in KB/sec | 2255.48      | 2285.25         | 2946.80          | 3119.43       |
+| throughput in Mbps   | 18.04        | 18.28           | 23.57            | 24.96         |
+- **Every server in this repo exceeds 10 Mbps line**
 ## Comparison of Designs
 This section investigates on other server designs, specifically, Netty and nginx.
 
